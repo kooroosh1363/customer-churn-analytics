@@ -1,0 +1,32 @@
+name: Churn Analytics CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  analytics-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run unit tests
+        run: python -m pytest -q
+      - name: Download official UCI churn data
+        run: python -m src.download_data
+      - name: Execute churn analytics pipeline
+        run: python -m src.run_analysis
+      - name: Validate deliverables
+        run: |
+          test -s outputs/executive_summary.csv
+          test -s outputs/tenure_churn.csv
+          test -s outputs/complaint_churn.csv
+          test -s outputs/status_churn.csv
+          test -s outputs/age_churn.csv
+          test -s outputs/usage_behavior.csv
+          test -s outputs/descriptive_risk_segments.csv
