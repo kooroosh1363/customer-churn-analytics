@@ -1,15 +1,40 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
+
+
+REQUIRED_COLUMNS = {
+    "subscription_length",
+    "complains",
+    "status",
+    "age",
+    "frequency_of_use",
+    "customer_value",
+    "churn",
+}
+
+
+def _normalize_column_name(name: str) -> str:
+    """Convert inconsistent UCI headers to stable snake_case names."""
+    normalized = re.sub(r"[^0-9a-zA-Z]+", "_", str(name).strip().lower())
+    return normalized.strip("_")
 
 
 def clean_churn_data(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize UCI column names/types while preserving the customer population."""
     out = df.copy()
-    out.columns = [
-        c.strip().lower().replace(" ", "_").replace("-", "_") for c in out.columns
-    ]
+    out.columns = [_normalize_column_name(c) for c in out.columns]
+
+    missing = sorted(REQUIRED_COLUMNS.difference(out.columns))
+    if missing:
+        raise ValueError(
+            "UCI churn schema is missing required normalized columns: "
+            f"{missing}. Available columns: {sorted(out.columns.tolist())}"
+        )
+
     out["churned"] = pd.to_numeric(out["churn"], errors="coerce").eq(1)
     return out
 
@@ -33,7 +58,9 @@ def churn_breakdown(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
     ).reset_index()
     g["churn_rate_pct"] = (100 * g["churned_customers"] / g["customers"]).round(2)
     overall = df["churned"].mean()
-    g["churn_rate_index"] = (g["churned_customers"] / g["customers"] / overall).round(2) if overall else 0.0
+    g["churn_rate_index"] = (
+        g["churned_customers"] / g["customers"] / overall
+    ).round(2) if overall else 0.0
     return g.sort_values(["churn_rate_pct", "customers"], ascending=[False, False])
 
 
@@ -50,8 +77,11 @@ def tenure_analysis(df: pd.DataFrame) -> pd.DataFrame:
 def usage_analysis(df: pd.DataFrame) -> pd.DataFrame:
     """Compare churned vs retained customers on behavior, not causal effects."""
     candidates = [
-        "seconds_of_use", "frequency_of_use", "frequency_of_sms",
-        "distinct_called_numbers", "customer_value"
+        "seconds_of_use",
+        "frequency_of_use",
+        "frequency_of_sms",
+        "distinct_called_numbers",
+        "customer_value",
     ]
     available = [c for c in candidates if c in df.columns]
     rows = []
@@ -89,14 +119,20 @@ def age_analysis(df: pd.DataFrame) -> pd.DataFrame:
 def descriptive_risk_profile(df: pd.DataFrame) -> pd.DataFrame:
     """Create transparent historical risk segments; this is not a prediction score."""
     x = df.copy()
-    usage = pd.to_numeric(x.get("frequency_of_use"), errors="coerce")
-    value = pd.to_numeric(x.get("customer_value"), errors="coerce")
+    usage = pd.to_numeric(x["frequency_of_use"], errors="coerce")
+    value = pd.to_numeric(x["customer_value"], errors="coerce")
     usage_cut = usage.median()
     value_cut = value.median()
     x["usage_level"] = np.where(usage < usage_cut, "lower_usage", "higher_usage")
     x["value_level"] = np.where(value < value_cut, "lower_value", "higher_value")
-    x["complaint_flag"] = np.where(pd.to_numeric(x["complains"], errors="coerce").eq(1), "complaint", "no_complaint")
-    g = x.groupby(["usage_level", "value_level", "complaint_flag"], dropna=False).agg(
+    x["complaint_flag"] = np.where(
+        pd.to_numeric(x["complains"], errors="coerce").eq(1),
+        "complaint",
+        "no_complaint",
+    )
+    g = x.groupby(
+        ["usage_level", "value_level", "complaint_flag"], dropna=False
+    ).agg(
         customers=("churned", "size"),
         churned_customers=("churned", "sum"),
     ).reset_index()
